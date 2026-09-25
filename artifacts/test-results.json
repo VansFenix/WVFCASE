@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "checks": [
+    "Guest session starts with 5,000 coins; desktop has no horizontal overflow",
+    "Case search, favorites and browser preference persistence work",
+    "Animated multi-opening and inventory survive page reload",
+    "Registration preserves guest items; logout and password login restore account",
+    "Daily bonus, unlimited free refill, promo and one-time claim protection work",
+    "Inventory selection, selling and virtual balance updates work",
+    "Upgrade chance selection, animation and server-side item consumption work",
+    "Three-item contract consumes inputs and saves exactly one new skin",
+    "Concurrent openings are atomic; the same inventory item cannot be sold twice",
+    "Ownership, duplicate IDs, invalid quantities and cross-origin writes are rejected",
+    "Standard CS2 catalog search, contents, probabilities and actual case opening work",
+    "Mobile navigation, full-length roulette, inventory and account dialog work without overflow",
+    "No browser JavaScript exceptions across all tested screens"
+  ],
+  "browserErrors": []
+}

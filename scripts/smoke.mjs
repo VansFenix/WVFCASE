@@ -1,0 +1,228 @@
+import { chromium, expect } from '@playwright/test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const base = process.env.TEST_BASE_URL || 'http://localhost:3000';
+const browser = await chromium.launch({ headless: true });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const page = await context.newPage();
+const errors = [];
+const users = new Set();
+const results = [];
+page.on('pageerror', (error) => errors.push(error.message));
+fs.mkdirSync('artifacts', { recursive: true });
+const log = (message) => { results.push(message); console.log('PASS', message); };
+const api = async (body, target = page) => target.evaluate(async (payload) => {
+  const response = await fetch('/api/game', payload ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } : { cache: 'no-store' });
+  return { status: response.status, data: await response.json() };
+}, body);
+const state = async (target = page) => { const result = await api(null, target); assert.equal(result.status, 200); users.add(result.data.user.id); return result.data; };
+
+try {
+  await page.goto(base, { waitUntil: 'networkidle' });
+  await page.evaluate(() => document.fonts.ready);
+  const initial = await state();
+  assert.equal(initial.user.coins, 5000);
+  assert.equal(initial.user.guest, true);
+  await expect(page.locator('.case-card')).toHaveCount(10);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  log('Guest session starts with 5,000 coins; desktop has no horizontal overflow');
+
+  await page.getByRole('textbox', { name: 'Найти свой кейс' }).fill('Неоновый');
+  await expect(page.locator('.case-card')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Очистить поиск' }).click();
+  await page.locator('.favorite-button').first().click();
+  await page.locator('.category-tabs').getByRole('button', { name: /Избранное/ }).click();
+  await expect(page.locator('.case-card')).toHaveCount(1);
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('.favorite-button.is-favorite')).toHaveCount(1);
+  log('Case search, favorites and browser preference persistence work');
+
+  await page.locator('.hero .primary-button').click();
+  await expect(page.getByRole('heading', { name: 'Первый дроп', exact: true })).toBeVisible();
+  await page.locator('.quick-toggle').click();
+  await page.getByRole('button', { name: 'x3', exact: true }).click();
+  await page.locator('.open-button').click();
+  await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('.result-item')).toHaveCount(3);
+  const opened = await state();
+  assert.equal(opened.inventory.length, 3);
+  assert.equal(opened.user.coins, 5000);
+  assert.equal(opened.user.opened, 3);
+  await page.screenshot({ path: 'artifacts/drop-result.png' });
+  await page.getByRole('button', { name: 'В инвентарь', exact: true }).click();
+  await expect(page.locator('.inventory-grid .skin-card')).toHaveCount(3);
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('.inventory-grid .skin-card')).toHaveCount(3);
+  assert.equal((await state()).user.id, initial.user.id);
+  log('Animated multi-opening and inventory survive page reload');
+
+  await page.locator('.save-banner').getByRole('button').click();
+  const email = `smoke-${Date.now()}@wvfcase.test`;
+  const password = 'Wvf-Testing-Only!2026';
+  await page.getByLabel('Никнейм', { exact: true }).pressSequentially('WVF Tester');
+  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByLabel('Пароль', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Создать аккаунт', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  let current = await state();
+  assert.equal(current.user.email, email);
+  assert.equal(current.user.id, initial.user.id);
+  assert.equal(current.inventory.length, 3);
+  await page.locator('.account-button').click();
+  await page.getByRole('button', { name: 'Выйти из аккаунта', exact: true }).click();
+  await expect(page.locator('.login-button')).toBeVisible();
+  await expect.poll(async () => (await state()).user.guest).toBe(true);
+  await page.locator('.login-button').click();
+  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByLabel('Пароль', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Войти в аккаунт', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  current = await state();
+  assert.equal(current.user.id, initial.user.id);
+  assert.equal(current.inventory.length, 3);
+  log('Registration preserves guest items; logout and password login restore account');
+
+  await page.locator('.nav-bonus').click();
+  await page.locator('.daily-card .primary-button').click();
+  await expect(page.locator('.daily-card .primary-button')).toHaveText(/Получен/);
+  await page.locator('.refill-card .secondary-button').click();
+  await expect.poll(async () => (await state()).user.coins).toBe(12500);
+  await page.locator('.promo-form button').click();
+  await expect(page.locator('.promo-form button')).toHaveText(/Активирован/);
+  assert.equal((await state()).user.coins, 14000);
+  assert.equal((await api({ action: 'daily' })).status, 400);
+  assert.equal((await api({ action: 'promo', code: 'WVFSTART' })).status, 400);
+  await page.keyboard.press('Escape');
+  log('Daily bonus, unlimited free refill, promo and one-time claim protection work');
+
+  await page.locator('.inventory-grid .skin-card').first().click();
+  await page.locator('.inventory-toolbar .primary-button').click();
+  await expect(page.locator('.inventory-grid .skin-card')).toHaveCount(2);
+  assert.equal((await state()).inventory.length, 2);
+  const supply = await api({ action: 'open', caseId: 'neon', quantity: 5 });
+  assert.equal(supply.status, 200);
+  await page.reload({ waitUntil: 'networkidle' });
+  await expect(page.locator('.inventory-grid .skin-card')).toHaveCount(7);
+  await page.screenshot({ path: 'artifacts/inventory.png', fullPage: true });
+  log('Inventory selection, selling and virtual balance updates work');
+
+  await page.locator('.main-nav').getByRole('button', { name: 'Апгрейд', exact: true }).click();
+  const sourceCards = page.locator('.upgrade-selectors > div').first().locator('.skin-card');
+  await expect(sourceCards).toHaveCount(7);
+  const lowSource = sourceCards.filter({ hasText: 'Candy Apple' });
+  if (await lowSource.count()) await lowSource.first().click(); else await sourceCards.first().click();
+  await page.locator('.upgrade-selectors > div').nth(1).locator('.skin-card').first().click();
+  const beforeUpgrade = await state();
+  await page.getByRole('button', { name: 'Сделать апгрейд', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+  const upgraded = await state();
+  assert.ok([beforeUpgrade.inventory.length, beforeUpgrade.inventory.length - 1].includes(upgraded.inventory.length));
+  assert.equal(upgraded.history[0].type, 'upgrade');
+  await page.screenshot({ path: 'artifacts/upgrade.png' });
+  await page.keyboard.press('Escape');
+  log('Upgrade chance selection, animation and server-side item consumption work');
+
+  await page.locator('.main-nav').getByRole('button', { name: 'Контракты', exact: true }).click();
+  const beforeContract = await state();
+  for (let i = 0; i < 3; i++) await page.locator('.contracts-view > .skin-grid .skin-card').nth(i).click();
+  await expect(page.locator('.contract-slot.filled')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Создать контракт', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+  const contracted = await state();
+  assert.equal(contracted.inventory.length, beforeContract.inventory.length - 2);
+  assert.equal(contracted.history[0].type, 'contract');
+  await page.screenshot({ path: 'artifacts/contract-result.png' });
+  await page.keyboard.press('Escape');
+  log('Three-item contract consumes inputs and saves exactly one new skin');
+
+  const beforeParallel = await state();
+  const concurrent = await page.evaluate(async () => Promise.all([1, 2].map(async () => {
+    const response = await fetch('/api/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'open', caseId: 'fire', quantity: 3 }) });
+    return response.status;
+  })));
+  assert.deepEqual(concurrent, [200, 200]);
+  const afterParallel = await state();
+  assert.equal(afterParallel.user.coins, beforeParallel.user.coins - 1494);
+  assert.equal(afterParallel.inventory.length, beforeParallel.inventory.length + 6);
+  const concurrentSale = await page.evaluate(async (id) => Promise.all([1, 2].map(async () => {
+    const response = await fetch('/api/game', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sell', itemIds: [id] }) });
+    return response.status;
+  })), afterParallel.inventory[0].id);
+  assert.deepEqual(concurrentSale.sort(), [200, 400]);
+  assert.equal((await state()).inventory.length, afterParallel.inventory.length - 1);
+  log('Concurrent openings are atomic; the same inventory item cannot be sold twice');
+
+  const outsiderContext = await browser.newContext();
+  const outsider = await outsiderContext.newPage();
+  await outsider.goto(base, { waitUntil: 'networkidle' });
+  await state(outsider);
+  const owned = (await state()).inventory[0].id;
+  assert.equal((await api({ action: 'sell', itemIds: [owned] }, outsider)).status, 400);
+  assert.equal((await api({ action: 'open', caseId: 'fire', quantity: -2 })).status, 400);
+  assert.equal((await api({ action: 'open', caseId: 'missing', quantity: 1 })).status, 400);
+  assert.equal((await api({ action: 'contract', itemIds: [owned, owned, owned] })).status, 400);
+  const csrf = await context.request.post(`${base}/api/game`, { headers: { Origin: 'https://untrusted.example' }, data: { action: 'refill' } });
+  assert.equal(csrf.status(), 403);
+  log('Ownership, duplicate IDs, invalid quantities and cross-origin writes are rejected');
+  await outsiderContext.close();
+
+  await page.goto(base, { waitUntil: 'networkidle' });
+  const official = JSON.parse(fs.readFileSync('src/data/official.json', 'utf8')).cases[0];
+  await page.locator('.category-tabs').getByRole('button', { name: 'Кейсы CS2', exact: true }).click();
+  await expect(page.locator('.case-card')).toHaveCount(10);
+  await page.getByRole('textbox', { name: 'Найти свой кейс' }).fill(official.name);
+  await expect(page.locator('.case-card')).toHaveCount(1);
+  await page.locator('.case-card-main').click();
+  await expect(page.getByRole('heading', { name: official.name, exact: true })).toBeVisible();
+  await expect(page.locator('.contents-grid .skin-card').first()).toBeVisible();
+  const beforeOfficial = await state();
+  await page.locator('.open-button').click();
+  await expect(page.getByRole('dialog')).toBeVisible({ timeout: 12000 });
+  const afterOfficial = await state();
+  assert.equal(afterOfficial.user.coins, beforeOfficial.user.coins - official.cost);
+  assert.equal(afterOfficial.inventory.length, beforeOfficial.inventory.length + 1);
+  assert.ok(afterOfficial.inventory[0].itemId.startsWith('skin-'));
+  log('Standard CS2 catalog search, contents, probabilities and actual case opening work');
+
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const mobile = await mobileContext.newPage();
+  mobile.on('pageerror', (error) => errors.push(error.message));
+  await mobile.goto(base, { waitUntil: 'networkidle' });
+  await mobile.evaluate(() => document.fonts.ready);
+  await state(mobile);
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await mobile.locator('.mobile-menu-toggle').click();
+  await expect(mobile.locator('.main-nav')).toBeVisible();
+  await mobile.locator('.main-nav').getByRole('button', { name: 'Апгрейд', exact: true }).click();
+  await expect(mobile.locator('.upgrade-view')).toBeVisible();
+  await mobile.locator('.site-header .brand-button').click();
+  await mobile.locator('.hero .primary-button').click();
+  const start = Date.now();
+  await mobile.locator('.open-button').click();
+  await expect(mobile.locator('.roulette-track')).toBeVisible();
+  await mobile.waitForTimeout(400);
+  await mobile.screenshot({ path: 'artifacts/mobile-roulette.png' });
+  await expect(mobile.getByRole('dialog')).toBeVisible({ timeout: 10000 });
+  assert.ok(Date.now() - start > 4000);
+  assert.equal((await state(mobile)).inventory.length, 1);
+  await mobile.getByRole('button', { name: 'В инвентарь', exact: true }).click();
+  await mobile.locator('.save-banner').getByRole('button').click();
+  await mobile.getByLabel('Никнейм', { exact: true }).fill('Мобильный игрок');
+  await mobile.screenshot({ path: 'artifacts/mobile-auth.png' });
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  log('Mobile navigation, full-length roulette, inventory and account dialog work without overflow');
+  await mobileContext.close();
+
+  assert.deepEqual(errors, []);
+  log('No browser JavaScript exceptions across all tested screens');
+  fs.writeFileSync('artifacts/test-results.json', JSON.stringify({ ok: true, checks: results, browserErrors: errors }, null, 2));
+  console.log(`\nAll ${results.length} end-to-end checks passed.`);
+} catch (error) {
+  await page.screenshot({ path: 'artifacts/test-failure.png', fullPage: true }).catch(() => {});
+  console.error(error);
+  process.exitCode = 1;
+} finally {
+  fs.writeFileSync('/tmp/wvf-test-users.json', JSON.stringify([...users]));
+  await browser.close();
+}
