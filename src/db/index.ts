@@ -8,14 +8,22 @@ const globalForDb = globalThis as typeof globalThis & {
 
 export function getPool(): Pool {
   if (!globalForDb.__arenaNextJsPostgresqlPool) {
-    const databaseUrl = process.env.DATABASE_URL;
+    let databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
     if (!databaseUrl) {
       throw new Error(
         "DATABASE_URL environment variable is required. Please set DATABASE_URL in your Vercel project settings."
       );
     }
+    const isLocal =
+      databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1");
+    if (!isLocal && !databaseUrl.includes("sslmode=")) {
+      databaseUrl += databaseUrl.includes("?")
+        ? "&sslmode=require"
+        : "?sslmode=require";
+    }
     globalForDb.__arenaNextJsPostgresqlPool = new Pool({
       connectionString: databaseUrl,
+      ssl: isLocal ? false : { rejectUnauthorized: false },
     });
   }
   return globalForDb.__arenaNextJsPostgresqlPool;
