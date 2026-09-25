@@ -13,7 +13,7 @@ export function Coin({ value, className = "" }: { value?: number; className?: st
 }
 
 export function SkinImage({ skin, className = "", eager = false }: { skin: Skin; className?: string; eager?: boolean }) {
-  return <img src={skin.image} alt={`${skin.weapon} | ${skin.name}`} className={`skin-image ${className}`} loading={eager ? "eager" : "lazy"} draggable={false} onError={(event) => { if (!event.currentTarget.src.endsWith("/images/skins/ak-slate.png")) event.currentTarget.src = "/images/skins/ak-slate.png"; }} />;
+  return <img src={skin.image} alt={`${skin.weapon} | ${skin.name}`} className={`skin-image ${className}`} loading={eager ? "eager" : "lazy"} draggable={false} onError={(event) => { event.currentTarget.style.visibility = "hidden"; }} />;
 }
 
 export function SkinCard({ skin, selected = false, onClick, detail, children }: { skin: Skin; selected?: boolean; onClick?: () => void; detail?: string; children?: ReactNode }) {

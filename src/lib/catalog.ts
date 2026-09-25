@@ -1,4 +1,6 @@
 import official from "@/data/official.json";
+import featuredImagesData from "@/data/featured-images.json";
+import caseImagesData from "@/data/case-images.json";
 
 export type Rarity = "gray" | "blue" | "purple" | "pink" | "red" | "gold";
 export type Skin = { id: string; weapon: string; name: string; rarity: Rarity; color: string; value: number; image: string };
@@ -7,6 +9,9 @@ export type Case = { id: string; name: string; subtitle: string; cost: number; i
 
 export const rarityColors: Record<Rarity, string> = { gray: "#9ba7b7", blue: "#5778ff", purple: "#a070ff", pink: "#e252e8", red: "#fa606b", gold: "#efbf62" };
 export const rarityNames: Record<Rarity, string> = { gray: "Ширпотреб", blue: "Армейское", purple: "Запрещённое", pink: "Засекреченное", red: "Тайное", gold: "Особый предмет" };
+
+const featuredImages: Record<string, string> = featuredImagesData;
+const caseImages: Record<string, string> = caseImagesData;
 
 const localDefinitions: [string, string, string, Rarity, number][] = [
   ["ak-asiimov", "AK-47", "Asiimov", "red", 1850],
@@ -35,25 +40,33 @@ const localDefinitions: [string, string, string, Rarity, number][] = [
   ["ak-ice", "AK-47", "Ice Coaled", "pink", 570],
 ];
 
-export const featuredSkins: Skin[] = localDefinitions.map(([id, weapon, name, rarity, value]) => ({ id, weapon, name, rarity, value, color: rarityColors[rarity], image: `/images/skins/${id}.png` }));
+export const featuredSkins: Skin[] = localDefinitions.map(([id, weapon, name, rarity, value]) => ({
+  id,
+  weapon,
+  name,
+  rarity,
+  value,
+  color: rarityColors[rarity],
+  image: featuredImages[id] || "",
+}));
 export const skins: Skin[] = [...featuredSkins, ...(official.skins as Skin[])];
 export const skinMap: Record<string, Skin> = Object.fromEntries(skins.map((s) => [s.id, s]));
 const allLocal = featuredSkins.map((s) => s.id);
 const under = (value: number) => featuredSkins.filter((s) => s.value <= value).map((s) => s.id);
 
 export const customCases: Case[] = [
-  { id: "first-drop", name: "Первый дроп", subtitle: "Большая история начинается здесь", cost: 0, image: "/images/case-starter.png", color: "#b6ed58", category: "free", tag: "FREE", itemIds: under(1900) },
-  { id: "neon", name: "Неоновый", subtitle: "Добавь красок в свою коллекцию", cost: 99, image: "/images/case-neon.png", color: "#52c6ff", category: "original", tag: "ХИТ", itemIds: [...under(2800), "karambit-doppler"] },
-  { id: "fire", name: "Огненный", subtitle: "Осторожно, горячий дроп", cost: 249, image: "/images/case-fire.png", color: "#ff913e", category: "original", tag: "ХИТ", itemIds: [...under(5400), "ak-serpent", "butterfly-fade"] },
-  { id: "midnight", name: "В сердце ночи", subtitle: "Для тех, кто не спит", cost: 499, image: "/images/case-void.png", color: "#ad83ff", category: "original", tag: "НОВИНКА", itemIds: allLocal },
-  { id: "dragon", name: "Дракон", subtitle: "Пробуди свою легенду", cost: 999, image: "/images/case-dragon.png", color: "#ff526c", category: "premium", itemIds: allLocal.filter((id) => !["p250-sand", "mac-candy"].includes(id)) },
-  { id: "golden-hour", name: "Золотой час", subtitle: "Время для особенных находок", cost: 1999, image: "/images/case-gold.png", color: "#efc568", category: "premium", tag: "TOP", itemIds: featuredSkins.filter((s) => s.value >= 1400).map((s) => s.id) },
-  { id: "cyberpunk", name: "Киберпанк", subtitle: "Твой пропуск в будущее", cost: 349, image: "/images/case-neon.png", color: "#68ffe2", hue: -28, category: "original", itemIds: allLocal },
-  { id: "secret", name: "Тайное послание", subtitle: "Редкости ждут внутри", cost: 749, image: "/images/case-void.png", color: "#e585ee", hue: 35, category: "original", itemIds: allLocal },
-  { id: "sniper", name: "Снайпер", subtitle: "Один выстрел — один дроп", cost: 599, image: "/images/case-starter.png", color: "#7ae4ca", hue: 55, category: "original", itemIds: ["awp-atheris", "awp-neonoir", "awp-asiimov", "awp-dragon"] },
-  { id: "knife-hunt", name: "Охота на ножи", subtitle: "Только самые острые эмоции", cost: 2499, image: "/images/case-gold.png", color: "#ffc288", hue: -15, category: "premium", tag: "★ RARE", itemIds: ["ak-slate", "usp-cortex", "ak-ice", "ak-neon", "karambit-doppler", "butterfly-fade", "gloves-vice"] },
-  { id: "red-line", name: "Красная линия", subtitle: "Переходи на новый уровень", cost: 799, image: "/images/case-dragon.png", color: "#ff7070", category: "original", itemIds: allLocal },
-  { id: "collector", name: "Коллекционер", subtitle: "Создан для твоего инвентаря", cost: 1499, image: "/images/case-fire.png", color: "#eab662", hue: 15, category: "premium", itemIds: allLocal.filter((id) => !["p250-sand", "mac-candy"].includes(id)) },
+  { id: "first-drop", name: "Первый дроп", subtitle: "Большая история начинается здесь", cost: 0, image: caseImages["crate-4904"] || "", color: "#b6ed58", category: "free", tag: "FREE", itemIds: under(1900) },
+  { id: "neon", name: "Неоновый", subtitle: "Добавь красок в свою коллекцию", cost: 99, image: caseImages["crate-4880"] || "", color: "#52c6ff", category: "original", tag: "ХИТ", itemIds: [...under(2800), "karambit-doppler"] },
+  { id: "fire", name: "Огненный", subtitle: "Осторожно, горячий дроп", cost: 249, image: caseImages["crate-4698"] || "", color: "#ff913e", category: "original", tag: "ХИТ", itemIds: [...under(5400), "ak-serpent", "butterfly-fade"] },
+  { id: "midnight", name: "В сердце ночи", subtitle: "Для тех, кто не спит", cost: 499, image: caseImages["crate-4818"] || "", color: "#ad83ff", category: "original", tag: "НОВИНКА", itemIds: allLocal },
+  { id: "dragon", name: "Дракон", subtitle: "Пробуди свою легенду", cost: 999, image: caseImages["crate-4717"] || "", color: "#ff526c", category: "premium", itemIds: allLocal.filter((id) => !["p250-sand", "mac-candy"].includes(id)) },
+  { id: "golden-hour", name: "Золотой час", subtitle: "Время для особенных находок", cost: 1999, image: caseImages["crate-7007"] || "", color: "#efc568", category: "premium", tag: "TOP", itemIds: featuredSkins.filter((s) => s.value >= 1400).map((s) => s.id) },
+  { id: "cyberpunk", name: "Киберпанк", subtitle: "Твой пропуск в будущее", cost: 349, image: caseImages["crate-4846"] || "", color: "#68ffe2", hue: -28, category: "original", itemIds: allLocal },
+  { id: "secret", name: "Тайное послание", subtitle: "Редкости ждут внутри", cost: 749, image: caseImages["crate-4790"] || "", color: "#e585ee", hue: 35, category: "original", itemIds: allLocal },
+  { id: "sniper", name: "Снайпер", subtitle: "Один выстрел — один дроп", cost: 599, image: caseImages["crate-4747"] || "", color: "#7ae4ca", hue: 55, category: "original", itemIds: ["awp-atheris", "awp-neonoir", "awp-asiimov", "awp-dragon"] },
+  { id: "knife-hunt", name: "Охота на ножи", subtitle: "Только самые острые эмоции", cost: 2499, image: caseImages["crate-4620"] || "", color: "#ffc288", hue: -15, category: "premium", tag: "★ RARE", itemIds: ["ak-slate", "usp-cortex", "ak-ice", "ak-neon", "karambit-doppler", "butterfly-fade", "gloves-vice"] },
+  { id: "red-line", name: "Красная линия", subtitle: "Переходи на новый уровень", cost: 799, image: caseImages["crate-4471"] || "", color: "#ff7070", category: "original", itemIds: allLocal },
+  { id: "collector", name: "Коллекционер", subtitle: "Создан для твоего инвентаря", cost: 1499, image: caseImages["crate-4403"] || "", color: "#eab662", hue: 15, category: "premium", itemIds: allLocal.filter((id) => !["p250-sand", "mac-candy"].includes(id)) },
 ];
 export const cases: Case[] = [...customCases, ...(official.cases as Case[])];
 export const caseMap: Record<string, Case> = Object.fromEntries(cases.map((c) => [c.id, c]));
