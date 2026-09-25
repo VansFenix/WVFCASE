@@ -13,7 +13,7 @@ export function Coin({ value, className = "" }: { value?: number; className?: st
 }
 
 export function SkinImage({ skin, className = "", eager = false }: { skin: Skin; className?: string; eager?: boolean }) {
-  return <img src={skin.image} alt={`${skin.weapon} | ${skin.name}`} className={`skin-image ${className}`} loading={eager ? "eager" : "lazy"} draggable={false} onError={(event) => { event.currentTarget.style.visibility = "hidden"; }} />;
+  return <img src={skin.image} alt={`${skin.weapon} | ${skin.name}`} className={`skin-image ${className}`} loading={eager ? "eager" : "lazy"} draggable={false} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.visibility = "hidden"; }} />;
 }
 
 export function SkinCard({ skin, selected = false, onClick, detail, children }: { skin: Skin; selected?: boolean; onClick?: () => void; detail?: string; children?: ReactNode }) {
@@ -27,7 +27,7 @@ export function CaseCard({ item, favorite, onFavorite, onOpen }: { item: Case; f
     {item.tag && <span className={`case-tag ${item.tag === "FREE" ? "tag-free" : ""}`}>{item.tag === "ХИТ" && <span>↗</span>}{item.tag}</span>}
     <button className={`favorite-button ${favorite ? "is-favorite" : ""}`} aria-label={favorite ? `Убрать ${item.name} из избранного` : `Добавить ${item.name} в избранное`} onClick={onFavorite}><Heart size={15} fill={favorite ? "currentColor" : "none"}/></button>
     <button className="case-card-main" onClick={onOpen} aria-label={`Открыть кейс ${item.name}`}>
-      <div className="case-art"><span className="case-halo"/><img src={item.image} alt={`Кейс ${item.name}`} loading="lazy" draggable={false} style={item.hue ? { filter: `hue-rotate(${item.hue}deg)` } : undefined}/></div>
+      <div className="case-art"><span className="case-halo"/><img src={item.image} alt="" loading="lazy" draggable={false} referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} style={item.hue ? { filter: `hue-rotate(${item.hue}deg)` } : undefined}/></div>
       <h3>{item.name}</h3><p>{item.subtitle}</p>
       <span className={`case-price ${item.cost === 0 ? "free-price" : ""}`}>{item.cost === 0 ? <><span>БЕСПЛАТНО</span><ArrowUpRight size={15}/></> : <><Coin value={item.cost}/><ArrowUpRight size={15}/></>}</span>
     </button>
