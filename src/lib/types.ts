@@ -36,5 +36,6 @@ export type GameResponse = GameState & {
   drops?: InventoryEntry[];
   won?: boolean;
   chance?: number;
+  roll?: number;
   message?: string;
 };

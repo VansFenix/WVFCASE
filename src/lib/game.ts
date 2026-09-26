@@ -33,7 +33,7 @@ function parseIds(input: unknown) {
   return ids;
 }
 
-type Outcome = { drops: InventoryEntry[]; message?: string; won?: boolean; chance?: number };
+type Outcome = { drops: InventoryEntry[]; message?: string; won?: boolean; chance?: number; roll?: number };
 
 export async function performAction(userId: string, input: Record<string, unknown>): Promise<GameResponse> {
   const result = await db.transaction(async (tx): Promise<Outcome> => {
@@ -110,11 +110,12 @@ export async function performAction(userId: string, input: Record<string, unknow
       const target = typeof input.targetId === "string" ? skinMap[input.targetId] : null;
       if (!from || !target || target.value <= from.value) throw new AppError("Выбери предмет дороже исходного.");
       const chance = Math.min(0.75, (from.value / target.value) * 0.85);
-      const won = random() < chance;
+      const roll = random();
+      const won = roll < chance;
       await tx.update(inventory).set({ status: "used" }).where(eq(inventory.id, source.id));
       const drops = won ? [await addItem(target, "upgrade")] : [];
       await addEvent("upgrade", won ? "Успешный апгрейд" : "Неудачный апгрейд", 0, won ? target.id : from.id);
-      return { drops, won, chance, message: won ? "Апгрейд успешен! Предмет в инвентаре." : "В этот раз не повезло. Исходный предмет использован." };
+      return { drops, won, chance, roll, message: won ? "Апгрейд успешен! Предмет в инвентаре." : "В этот раз не повезло. Исходный предмет использован." };
     }
 
     if (input.action === "contract") {

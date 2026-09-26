@@ -30,23 +30,87 @@ function DropResult({ drops, act, onClose, onInventory, onAgain }: { drops: Inve
   </Modal>;
 }
 
-function playReelSound(duration: number) {
+let globalAudioCtx: AudioContext | null = null;
+function getAudioContext(): AudioContext | null {
   try {
-    const ctx = new AudioContext();
-    void ctx.resume();
-    for (let i = 0; i < 25; i++) {
-      const time = ctx.currentTime + 0.08 + Math.pow(i / 25, 1.7) * (duration / 1000 - 0.25);
-      const oscillator = ctx.createOscillator();
-      const gain = ctx.createGain();
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(680 + i * 9, time);
-      gain.gain.setValueAtTime(0.022, time);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.025);
-      oscillator.connect(gain); gain.connect(ctx.destination);
-      oscillator.start(time); oscillator.stop(time + 0.03);
+    if (!globalAudioCtx && typeof window !== "undefined") {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx) globalAudioCtx = new AudioCtx();
     }
-    setTimeout(() => { void ctx.close(); }, duration + 500);
-  } catch { /* Sound is optional; the visual opening always works. */ }
+    if (globalAudioCtx && globalAudioCtx.state === "suspended") {
+      void globalAudioCtx.resume();
+    }
+    return globalAudioCtx;
+  } catch {
+    return null;
+  }
+}
+
+function playReelSound(duration: number) {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const totalTicks = 35;
+    for (let i = 0; i < totalTicks; i++) {
+      const progress = i / totalTicks;
+      const delay = 0.05 + Math.pow(progress, 2.3) * (duration / 1000 - 0.2);
+      const time = ctx.currentTime + delay;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(650 + (i % 3) * 35, time);
+      gain.gain.setValueAtTime(0.025, time);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.02);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(time);
+      osc.stop(time + 0.025);
+    }
+  } catch {}
+}
+
+function playUpgradeSpin(duration: number) {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const totalTicks = 28;
+    for (let i = 0; i < totalTicks; i++) {
+      const progress = i / totalTicks;
+      const delay = 0.05 + Math.pow(progress, 2.4) * (duration / 1000 - 0.2);
+      const time = ctx.currentTime + delay;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(540 + (i % 4) * 45, time);
+      gain.gain.setValueAtTime(0.02, time);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.025);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(time);
+      osc.stop(time + 0.03);
+    }
+  } catch {}
+}
+
+function playFanfare(won: boolean) {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    const notes = won ? [523.25, 659.25, 783.99, 1046.5] : [392, 349.23, 311.13, 261.63];
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = won ? "sine" : "triangle";
+      osc.frequency.setValueAtTime(freq, now + idx * 0.11);
+      gain.gain.setValueAtTime(won ? 0.045 : 0.03, now + idx * 0.11);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.11 + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + idx * 0.11);
+      osc.stop(now + idx * 0.11 + 0.28);
+    });
+  } catch {}
 }
 
 export function CaseOpening({ item, state, act, navigate, onBack, onBonus, sound }: SharedProps & { item: Case; onBack: () => void; onBonus: () => void; sound: boolean }) {
@@ -55,6 +119,7 @@ export function CaseOpening({ item, state, act, navigate, onBack, onBonus, sound
   const [phase, setPhase] = useState<"idle" | "request" | "rolling" | "done">("idle");
   const [reel, setReel] = useState<Skin[]>([]);
   const [rolling, setRolling] = useState(false);
+  const [jitterOffset, setJitterOffset] = useState(0);
   const [drops, setDrops] = useState<InventoryEntry[]>([]);
   const [showAll, setShowAll] = useState(false);
   const later = useSafeTimers();
@@ -63,22 +128,45 @@ export function CaseOpening({ item, state, act, navigate, onBack, onBonus, sound
   const busy = phase === "rolling" || phase === "request";
   const cost = item.cost * quantity;
 
-  useEffect(() => { setFast(localStorage.getItem("wvf-fast") === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches); }, []);
+  useEffect(() => {
+    setFast(localStorage.getItem("wvf-fast") === "true");
+  }, []);
 
   const open = async () => {
     if (busy || !state) return;
     if (state.user.coins < cost) { onBonus(); return; }
+    getAudioContext();
     setDrops([]); setPhase("request"); setRolling(false);
     const result = await act({ action: "open", caseId: item.id, quantity });
     if (!result?.drops?.length) { setPhase("idle"); return; }
     const winners = result.drops;
-    const frames = Array.from({ length: 40 }, () => pool[Math.floor(Math.random() * pool.length)].skin);
-    frames[32] = skinMap[winners[0].itemId];
-    setReel(frames); setPhase("rolling");
-    const duration = fast ? 650 : 4600;
+    
+    // 75 items reel for generous width on PC screens
+    const totalFrames = 75;
+    const winnerIdx = 55;
+    const frames = Array.from({ length: totalFrames }, () => pool[Math.floor(Math.random() * pool.length)].skin);
+    frames[winnerIdx] = skinMap[winners[0].itemId];
+    const jitter = Math.floor(Math.random() * 50) - 25;
+    setJitterOffset(jitter);
+    setReel(frames);
+    setPhase("rolling");
+    
+    const duration = fast ? 1100 : 4800;
     if (sound) playReelSound(duration);
-    later(() => setRolling(true), 70);
-    later(() => { setPhase("done"); setDrops(winners); }, duration + 200);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setRolling(true);
+      });
+    });
+
+    later(() => {
+      setPhase("done");
+      if (sound) playFanfare(true);
+      later(() => {
+        setDrops(winners);
+      }, 1100);
+    }, duration);
   };
 
   return <section className="case-opening page-enter">
@@ -86,7 +174,30 @@ export function CaseOpening({ item, state, act, navigate, onBack, onBonus, sound
     <div className="opening-heading"><span className="eyebrow">WVFCASE COLLECTION</span><h1>{item.name}</h1><p>{item.subtitle}</p></div>
     <div className={`opening-stage ${busy ? "is-opening" : ""}`} style={{ "--case-color": item.color } as CSSProperties}>
       <div className="stage-grid"/>
-      {phase === "idle" || phase === "request" ? <div className="stage-idle"><span className="stage-watermark">WVFCASE</span><img src={item.image} alt={item.name} className="opening-case-image" referrerPolicy="no-referrer" style={item.hue ? { filter: `hue-rotate(${item.hue}deg)` } : undefined}/>{phase === "request" && <div className="opening-loader"><Spinner/> Готовим твой дроп...</div>}</div> : <div className="roulette-window"><div className="roulette-pointer top-pointer"/><div className="roulette-track" style={{ transform: `translateX(-${rolling ? 32 * 170 + 80 : 80}px)`, transition: rolling ? `transform ${fast ? 650 : 4600}ms cubic-bezier(.12,.73,.12,1)` : "none" }}>{reel.map((skin, index) => <div className={`reel-item ${phase === "done" && index === 32 ? "winner" : ""}`} key={`${skin.id}-${index}`} style={{ "--rarity": skin.color } as CSSProperties}><SkinImage skin={skin} eager/><small>{skin.weapon}</small><strong>{skin.name}</strong></div>)}</div><div className="roulette-pointer bottom-pointer"/><span className="roulette-fade left"/><span className="roulette-fade right"/></div>}
+      {phase === "idle" || phase === "request" ? (
+        <div className="stage-idle"><span className="stage-watermark">WVFCASE</span><img src={item.image} alt={item.name} className="opening-case-image" referrerPolicy="no-referrer" style={item.hue ? { filter: `hue-rotate(${item.hue}deg)` } : undefined}/>{phase === "request" && <div className="opening-loader"><Spinner/> Готовим твой дроп...</div>}</div>
+      ) : (
+        <div className="roulette-window">
+          <div className="roulette-pointer top-pointer"/>
+          <div
+            className="roulette-track"
+            style={{
+              transform: `translateX(-${rolling ? (55 * 170 + 80 + jitterOffset) : 80}px)`,
+              transition: rolling ? `transform ${fast ? 1100 : 4800}ms cubic-bezier(.08,.84,.18,1)` : "none"
+            }}
+          >
+            {reel.map((skin, index) => (
+              <div className={`reel-item ${phase === "done" && index === 55 ? "winner" : ""}`} key={`${skin.id}-${index}`} style={{ "--rarity": skin.color } as CSSProperties}>
+                <SkinImage skin={skin} eager/>
+                <small>{skin.weapon}</small>
+                <strong>{skin.name}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="roulette-pointer bottom-pointer"/>
+          <span className="roulette-fade left"/><span className="roulette-fade right"/>
+        </div>
+      )}
       <div className="stage-caption"><span><Shuffle size={12}/> СЛУЧАЙНЫЙ ДРОП</span><span><ShieldCheck size={12}/> ТВОЙ ПРОГРЕСС СОХРАНЯЕТСЯ</span></div>
     </div>
     <div className="opening-controls"><div className="quantity-control"><span>КОЛИЧЕСТВО</span><div>{[1, 2, 3, 5].map((n) => <button key={n} onClick={() => setQuantity(n)} disabled={busy} className={quantity === n ? "active" : ""}>x{n}</button>)}</div></div><button className="primary-button open-button" disabled={busy || !state} onClick={open}>{busy ? <><Spinner/> {phase === "request" ? "Подготовка..." : "Открываем..."}</> : <><Box size={18}/>{cost === 0 ? "Открыть бесплатно" : <>Открыть за <Coin value={cost}/></>}<ArrowRight size={17}/></>}</button><label className="quick-toggle"><input type="checkbox" checked={fast} disabled={busy} onChange={(e) => { setFast(e.target.checked); localStorage.setItem("wvf-fast", String(e.target.checked)); }}/><span className="switch"/><Zap size={15}/> Быстро</label></div>
@@ -131,22 +242,139 @@ export function UpgradeView({ state, act, navigate }: SharedProps) {
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<GameResponse | null>(null);
   const [allItems, setAllItems] = useState(false);
+  const [needleAngle, setNeedleAngle] = useState(0);
+  const [needleTransition, setNeedleTransition] = useState(false);
+  const [landed, setLanded] = useState<{ won: boolean; roll: number; chance: number } | null>(null);
   const later = useSafeTimers();
-  const chance = source && target && target.value > source.skin.value ? Math.min(75, source.skin.value / target.value * 85) : 0;
+
+  const chance = source && target && target.value > source.skin.value ? Math.min(75, (source.skin.value / target.value) * 85) : 0;
   const choices = featuredSkins.filter((s) => !source || s.value > source.skin.value * multiplier).sort((a, b) => a.value - b.value);
+
   const upgrade = async () => {
     if (!source || !target || spinning || !chance) return;
+    getAudioContext();
     setSpinning(true);
+    setLanded(null);
     const response = await act({ action: "upgrade", inventoryId: source.id, targetId: target.id });
     if (!response) { setSpinning(false); return; }
-    later(() => { setResult(response); setSource(null); setSpinning(false); }, 2300);
+
+    const won = Boolean(response.won);
+    const roll = typeof response.roll === "number"
+      ? response.roll
+      : (won ? Math.random() * (chance / 100) * 0.9 + 0.02 : (chance / 100) + Math.random() * (1 - chance / 100) * 0.92 + 0.02);
+    const rollPercent = roll * 100;
+    const rollAngle = (rollPercent / 100) * 360;
+
+    const duration = 3500;
+    // Rotate 5 full revolutions + exact landing angle
+    const nextAngle = needleAngle + (360 * 5) - (needleAngle % 360) + rollAngle;
+    setNeedleTransition(true);
+    setNeedleAngle(nextAngle);
+    playUpgradeSpin(duration);
+
+    later(() => {
+      const landedResult = { won, roll: rollPercent, chance };
+      setLanded(landedResult);
+      playFanfare(won);
+
+      later(() => {
+        setResult(response);
+        setSource(null);
+        setSpinning(false);
+      }, 1400);
+    }, duration);
   };
+
   const inventoryItems = state?.inventory || [];
-  return <section className="upgrade-view page-enter"><div className="page-title centered"><span className="eyebrow">ПОДНИМИ СТАВКУ. БЕЗ РЕАЛЬНЫХ СТАВОК.</span><h1>Время для <span className="orange-text">апгрейда</span></h1><p>Преврати любимый скин в предмет мечты. Всё по-честному, всё бесплатно.</p></div>
-    <div className={`upgrade-arena ${spinning ? "upgrading" : ""}`}><div className={`upgrade-slot ${source ? "has-item" : ""}`} style={{ "--rarity": source?.skin.color || "#ff8a3d" } as CSSProperties}><span className="slot-label">ТВОЙ ПРЕДМЕТ</span>{source ? <><SkinImage skin={source.skin}/><small>{source.skin.weapon}</small><h3>{source.skin.name}</h3><Coin value={source.skin.value}/>{!spinning && <button className="slot-remove icon-button" onClick={() => setSource(null)} aria-label="Убрать исходный предмет"><X size={16}/></button>}</> : <><div className="slot-placeholder"><Plus size={32}/></div><h3>Выбери свой скин</h3><p>Из инвентаря ниже</p></>}</div><div className="upgrade-center"><div className="chance-ring" style={{ "--progress": `${chance * 3.6}deg` } as CSSProperties}><div className="chance-ring-inner"><TrendingUp size={27}/><strong>{chance.toFixed(1)}<span>%</span></strong><small>ШАНС УСПЕХА</small></div><span className="chance-needle"/></div><button className="primary-button" disabled={!chance || spinning} onClick={upgrade}>{spinning ? <><Spinner/> Улучшаем...</> : <><Zap size={17}/> Сделать апгрейд</>}</button><p><ShieldCheck size={12}/> Результат определяется сервером</p></div><div className={`upgrade-slot ${target ? "has-item" : ""}`} style={{ "--rarity": target?.color || "#ff8a3d" } as CSSProperties}><span className="slot-label">ТВОЯ ЦЕЛЬ</span>{target ? <><SkinImage skin={target}/><small>{target.weapon}</small><h3>{target.name}</h3><Coin value={target.value}/>{!spinning && <button className="slot-remove icon-button" onClick={() => setTarget(null)} aria-label="Убрать цель"><X size={16}/></button>}</> : <><div className="slot-placeholder"><Sparkles size={31}/></div><h3>Выбери цель</h3><p>Предмет дороже твоего</p></>}</div></div>
+  return <section className="upgrade-view page-enter">
+    <div className="page-title centered"><span className="eyebrow">ПОДНИМИ СТАВКУ. БЕЗ РЕАЛЬНЫХ СТАВОК.</span><h1>Время для <span className="orange-text">апгрейда</span></h1><p>Преврати любимый скин в предмет мечты. Всё по-честному, всё бесплатно.</p></div>
+    <div className={`upgrade-arena ${spinning ? "upgrading" : ""}`}>
+      <div className={`upgrade-slot ${source ? "has-item" : ""}`} style={{ "--rarity": source?.skin.color || "#ff8a3d" } as CSSProperties}>
+        <span className="slot-label">ТВОЙ ПРЕДМЕТ</span>
+        {source ? (
+          <>
+            <SkinImage skin={source.skin}/>
+            <small>{source.skin.weapon}</small>
+            <h3>{source.skin.name}</h3>
+            <Coin value={source.skin.value}/>
+            {!spinning && <button className="slot-remove icon-button" onClick={() => { setSource(null); setLanded(null); }} aria-label="Убрать исходный предмет"><X size={16}/></button>}
+          </>
+        ) : (
+          <>
+            <div className="slot-placeholder"><Plus size={32}/></div>
+            <h3>Выбери свой скин</h3>
+            <p>Из инвентаря ниже</p>
+          </>
+        )}
+      </div>
+
+      <div className="upgrade-center">
+        <div className="chance-ring" style={{ "--progress": `${chance * 3.6}deg` } as CSSProperties}>
+          <div className="chance-ring-inner">
+            <TrendingUp size={27}/>
+            <strong>{chance.toFixed(1)}<span>%</span></strong>
+            <small>ШАНС УСПЕХА</small>
+            <span className="chance-dial-label">ЗОНА: 0% — {chance.toFixed(1)}%</span>
+          </div>
+          <div
+            className={`chance-needle ${landed ? (landed.won ? "needle-won" : "needle-lost") : ""}`}
+            style={{
+              transform: `rotate(${needleAngle}deg)`,
+              transition: needleTransition ? "transform 3500ms cubic-bezier(0.12, 0.85, 0.25, 1)" : "none"
+            }}
+          >
+            <span className="chance-needle-arrow"/>
+            <span className="chance-needle-dot"/>
+          </div>
+        </div>
+
+        {spinning && (
+          <div className="upgrade-status is-spinning">
+            <Spinner size={14}/> Вращаем стрелку...
+          </div>
+        )}
+        {landed && !spinning && (
+          <div className={`upgrade-status ${landed.won ? "win" : "fail"}`}>
+            {landed.won
+              ? `🎯 Стрелка: ${landed.roll.toFixed(1)}% (попало в зону 0% — ${landed.chance.toFixed(1)}%) — УСПЕХ!`
+              : `❌ Стрелка: ${landed.roll.toFixed(1)}% (вне зоны 0% — ${landed.chance.toFixed(1)}%) — НЕУДАЧА`}
+          </div>
+        )}
+        {!spinning && !landed && (
+          <div className="upgrade-status">
+            {chance > 0 ? `Зона победы: от 0% до ${chance.toFixed(1)}%` : "Выбери исходный скин и цель"}
+          </div>
+        )}
+
+        <button className="primary-button" disabled={!chance || spinning} onClick={upgrade}>
+          {spinning ? <><Spinner/> Улучшаем...</> : <><Zap size={17}/> Сделать апгрейд</>}
+        </button>
+        <p><ShieldCheck size={12}/> Результат определяется сервером</p>
+      </div>
+
+      <div className={`upgrade-slot ${target ? "has-item" : ""}`} style={{ "--rarity": target?.color || "#ff8a3d" } as CSSProperties}>
+        <span className="slot-label">ТВОЯ ЦЕЛЬ</span>
+        {target ? (
+          <>
+            <SkinImage skin={target}/>
+            <small>{target.weapon}</small>
+            <h3>{target.name}</h3>
+            <Coin value={target.value}/>
+            {!spinning && <button className="slot-remove icon-button" onClick={() => { setTarget(null); setLanded(null); }} aria-label="Убрать цель"><X size={16}/></button>}
+          </>
+        ) : (
+          <>
+            <div className="slot-placeholder"><Sparkles size={31}/></div>
+            <h3>Выбери цель</h3>
+            <p>Предмет дороже твоего</p>
+          </>
+        )}
+      </div>
+    </div>
+
     <div className="game-warning"><CircleHelp size={16}/><span>При неудачном апгрейде исходный предмет исчезнет. Шанс = 85% × отношение цен, максимум 75%. Это бесплатная симуляция.</span></div>
-    <div className="upgrade-selectors"><div><div className="section-heading"><h2><Package size={19}/> Твой инвентарь <span className="count-badge">{inventoryItems.length}</span></h2></div>{inventoryItems.length ? <><div className="selector-grid">{inventoryItems.slice(0, allItems ? undefined : 24).map((i) => <SkinCard key={i.id} skin={skinMap[i.itemId]} selected={source?.id === i.id} onClick={() => { if (!spinning) { setSource({ id: i.id, skin: skinMap[i.itemId] }); if (target && target.value <= skinMap[i.itemId].value) setTarget(null); } }}/>)}</div>{inventoryItems.length > 24 && !allItems && <button className="text-button load-more" onClick={() => setAllItems(true)}>Показать все предметы</button>}</> : <div className="empty-state small-empty"><Box size={33}/><h3>Нужен первый предмет</h3><p>Загляни в бесплатный кейс</p><button className="secondary-button" onClick={() => navigate("cases")}>К кейсам <ArrowRight size={15}/></button></div>}</div><div><div className="section-heading"><h2><Sparkles size={19}/> Желаемый предмет</h2><div className="multiplier-tabs">{[1, 2, 5, 10].map((n) => <button className={multiplier === n ? "active" : ""} key={n} onClick={() => setMultiplier(n)}>{n === 1 ? "Все" : `x${n}`}</button>)}</div></div><div className="selector-grid">{choices.map((skin) => <SkinCard key={skin.id} skin={skin} selected={target?.id === skin.id} onClick={() => { if (!spinning) setTarget(skin); }}/>)}</div>{!choices.length && <div className="empty-state small-empty"><p>Нет целей с таким множителем.</p><button className="text-button" onClick={() => setMultiplier(1)}>Показать все</button></div>}</div></div>
-    {result?.won && result.drops?.length ? <DropResult drops={result.drops} act={act} onClose={() => setResult(null)} onInventory={() => navigate("inventory")}/> : result && <Modal title="В этот раз не повезло" onClose={() => setResult(null)}><div className="failed-upgrade"><TrendingUp size={56}/><p>Исходный предмет использован, но новая попытка всегда рядом. Открой бесплатный кейс и попробуй снова.</p><button className="primary-button" onClick={() => setResult(null)}>Попробовать ещё <ArrowRight size={16}/></button></div></Modal>}
+    <div className="upgrade-selectors"><div><div className="section-heading"><h2><Package size={19}/> Твой инвентарь <span className="count-badge">{inventoryItems.length}</span></h2></div>{inventoryItems.length ? <><div className="selector-grid">{inventoryItems.slice(0, allItems ? undefined : 24).map((i) => <SkinCard key={i.id} skin={skinMap[i.itemId]} selected={source?.id === i.id} onClick={() => { if (!spinning) { setSource({ id: i.id, skin: skinMap[i.itemId] }); setLanded(null); if (target && target.value <= skinMap[i.itemId].value) setTarget(null); } }}/>)}</div>{inventoryItems.length > 24 && !allItems && <button className="text-button load-more" onClick={() => setAllItems(true)}>Показать все предметы</button>}</> : <div className="empty-state small-empty"><Box size={33}/><h3>Нужен первый предмет</h3><p>Загляни в бесплатный кейс</p><button className="secondary-button" onClick={() => navigate("cases")}>К кейсам <ArrowRight size={15}/></button></div>}</div><div><div className="section-heading"><h2><Sparkles size={19}/> Желаемый предмет</h2><div className="multiplier-tabs">{[1, 2, 5, 10].map((n) => <button className={multiplier === n ? "active" : ""} key={n} onClick={() => setMultiplier(n)}>{n === 1 ? "Все" : `x${n}`}</button>)}</div></div><div className="selector-grid">{choices.map((skin) => <SkinCard key={skin.id} skin={skin} selected={target?.id === skin.id} onClick={() => { if (!spinning) { setTarget(skin); setLanded(null); } }}/>)}</div>{!choices.length && <div className="empty-state small-empty"><p>Нет целей с таким множителем.</p><button className="text-button" onClick={() => setMultiplier(1)}>Показать все</button></div>}</div></div>
+    {result?.won && result.drops?.length ? <DropResult drops={result.drops} act={act} onClose={() => setResult(null)} onInventory={() => navigate("inventory")}/> : result && <Modal title="В этот раз не повезло" onClose={() => setResult(null)}><div className="failed-upgrade"><TrendingUp size={56}/><p>Стрелка остановилась на {landed ? `${landed.roll.toFixed(1)}% (нужно было < ${landed.chance.toFixed(1)}%)` : "секторе неудачи"}. Исходный предмет использован, но новая попытка всегда рядом.</p><button className="primary-button" onClick={() => setResult(null)}>Попробовать ещё <ArrowRight size={16}/></button></div></Modal>}
   </section>;
 }
 
