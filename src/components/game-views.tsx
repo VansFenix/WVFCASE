@@ -324,7 +324,6 @@ export function UpgradeView({ state, act, navigate }: SharedProps) {
             }}
           >
             <span className="chance-needle-arrow"/>
-            <span className="chance-needle-dot"/>
           </div>
         </div>
 
